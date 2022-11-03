@@ -10,10 +10,9 @@ A host of tree-based machine learning (ML) models and interpretation techniques 
 are extensively compared to determine the best model architecture and justify the interpretation robustness.
 
 ## Code structure
-* Data used for model building is located at the folder `data`, which is computed via `State_Features.py`.
-* Three R scripts are used to fit the GAM models. Our model predicts the daily average number of trips and
-daily average PMT across all states.
-* `Plot_Fig56.py` is used to model results plot.
+* Data used for model building is located at the folder `data`, which is computed via `1.0-Match_CBG_POI.py`, `1.1-Read_Data.py`, `1.2-Data_EDA.py`.
+* `3.0-models-origin.py`, `3.1-models-transform.py` are used for model training and tuning. The first uses the original data while the second considers the data transformation.
+* `4.1-Interpret models.py` is used to interpret the trained model.
 
 
 ## Results
