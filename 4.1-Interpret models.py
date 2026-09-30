@@ -438,9 +438,8 @@ for kk in alltrails:
     lgb_feature_imp['MAPE'] = np.float(kk.split('.pickle')[0].split('-')[1]) * 100
     lgb_feature_imp_all = lgb_feature_imp_all.append(lgb_feature_imp)
 
-# Adjust MAPE
-min_lgb_mape = 27.220
-lgb_feature_imp_all['MAPE'] = (min_lgb_mape / min(lgb_feature_imp_all['MAPE'])) * lgb_feature_imp_all['MAPE']
+# Use the actual best measured MAPE for the zoomed plot.
+min_lgb_mape = lgb_feature_imp_all['MAPE'].min()
 
 # Only need top 10 features and others
 lgb_feature_imp_bt = lgb_feature_imp_all[lgb_feature_imp_all['MAPE'] == min(lgb_feature_imp_all['MAPE'])]
@@ -536,10 +535,8 @@ fig, ax = plt.subplots(2, 3, figsize=(15, 9.5))
 axs = ax.flatten()
 for kk in range(0, len(pall_para)):
     lgb_feature_imp_runs_o = all_lgb_feature[all_lgb_feature['Para'] == pall_para[kk]]
-    lbg_acc = all_lbg_acc[all_lbg_acc['Para'] == pall_para[kk]]
-    # Adjust MAPE
-    lbg_acc['Train'] = (random.uniform(0.25, 0.27) / min(lbg_acc['Train'])) * lbg_acc['Train']
-    lbg_acc['Valid'] = (random.uniform(0.27, 0.30) / min(lbg_acc['Valid'])) * lbg_acc['Valid']
+    lbg_acc = all_lbg_acc[all_lbg_acc['Para'] == pall_para[kk]].copy()
+    # Plot the MAPE recorded by the estimator without random rescaling.
     sns.lineplot(x="num", y="gain", hue="Feature_names_o", data=lgb_feature_imp_runs_o, palette='coolwarm',
                  style="Feature_names_o", markers=True, ax=axs[kk], lw=2, markersize=7)
     axs[kk].legend([])
