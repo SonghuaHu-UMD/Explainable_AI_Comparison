@@ -1,3 +1,4 @@
+from cv_utils import fit_supported
 # Use to check the  prediction metrics for lightgbm
 import datetime
 import optuna
@@ -436,7 +437,7 @@ for kk in alltrails:
     lgb_feature_imp['split'] = 100 * lgb_feature_imp['split'] / sum(lgb_feature_imp['split'])
     lgb_feature_imp['gain'] = 100 * lgb_feature_imp['gain'] / sum(lgb_feature_imp['gain'])
     lgb_feature_imp['MAPE'] = np.float(kk.split('.pickle')[0].split('-')[1]) * 100
-    lgb_feature_imp_all = lgb_feature_imp_all.append(lgb_feature_imp)
+    lgb_feature_imp_all = pd.concat([lgb_feature_imp_all, lgb_feature_imp], ignore_index=True)
 
 # Use the actual best measured MAPE for the zoomed plot.
 min_lgb_mape = lgb_feature_imp_all['MAPE'].min()
@@ -484,31 +485,36 @@ def para_rerun(lgb_est0, p_list, p_name):
     lbg_acc = pd.DataFrame()
     for kk in p_list:
         fold = KFold(n_splits=5, shuffle=True, random_state=0)
-        for fold_idx, (train_idx, valid_idx) in enumerate(fold.split(range(len(data_dm_x)))): print(kk)
-        lgb_est.set_params(**{p_name: kk})
-        lgb_est.fit(data_dm_x.loc[train_idx], data_raw_train.loc[train_idx, 'Mobility'], verbose=False,
-                    eval_set=[(data_dm_x.loc[train_idx], data_raw_train.loc[train_idx, 'Mobility']),
-                              (data_dm_x.loc[valid_idx], data_raw_train.loc[valid_idx, 'Mobility'])],
-                    eval_metric='mape')
-        lgb_feature_imp = pd.DataFrame(
-            {'split': lgb_est.booster_.feature_importance(importance_type='split'),
-             'gain': lgb_est.booster_.feature_importance(importance_type='gain'),
-             'Feature_names': list(data_dm_x.columns)}).sort_values(by=['gain'], ascending=False)
-        lgb_feature_imp['split'] = 100 * lgb_feature_imp['split'] / sum(lgb_feature_imp['split'])
-        lgb_feature_imp['gain'] = 100 * lgb_feature_imp['gain'] / sum(lgb_feature_imp['gain'])
-        lgb_feature_imp['num'] = kk
-        lgb_feature_imp_runs = lgb_feature_imp_runs.append(lgb_feature_imp)
-        learning_df = pd.DataFrame({'Train': list(lgb_est.evals_result_['valid_0'].values())[0],
-                                    'Valid': list(lgb_est.evals_result_['valid_1'].values())[0]})
-        learning_df['num'] = kk
-        lbg_acc = lbg_acc.append(learning_df.tail(1))
+        for fold_idx, (train_idx, valid_idx) in enumerate(fold.split(range(len(data_dm_x)))):
+            print(kk)
+            lgb_est = copy.deepcopy(lgb_est0)
+            lgb_est.set_params(**{p_name: kk})
+            fit_supported(lgb_est, data_dm_x.iloc[train_idx], data_raw_train.iloc[train_idx]['Mobility'], verbose=False,
+                        eval_set=[(data_dm_x.iloc[train_idx], data_raw_train.iloc[train_idx]['Mobility']),
+                                  (data_dm_x.iloc[valid_idx], data_raw_train.iloc[valid_idx]['Mobility'])],
+                        eval_metric='mape')
+            lgb_feature_imp = pd.DataFrame(
+                {'split': lgb_est.booster_.feature_importance(importance_type='split'),
+                 'gain': lgb_est.booster_.feature_importance(importance_type='gain'),
+                 'Feature_names': list(data_dm_x.columns)}).sort_values(by=['gain'], ascending=False)
+            lgb_feature_imp['split'] = 100 * lgb_feature_imp['split'] / sum(lgb_feature_imp['split'])
+            lgb_feature_imp['gain'] = 100 * lgb_feature_imp['gain'] / sum(lgb_feature_imp['gain'])
+            lgb_feature_imp['num'] = kk
+            lgb_feature_imp['fold'] = fold_idx
+            lgb_feature_imp_runs = pd.concat([lgb_feature_imp_runs, lgb_feature_imp], ignore_index=True)
+            learning_df = pd.DataFrame({'Train': list(lgb_est.evals_result_['valid_0'].values())[0],
+                                        'Valid': list(lgb_est.evals_result_['valid_1'].values())[0]})
+            learning_df['num'] = kk
+            learning_df['fold'] = fold_idx
+            lbg_acc = pd.concat([lbg_acc, learning_df.tail(1)], ignore_index=True)
 
     # Only need top 10 and others
     top_label = ['POI Count', 'Others', 'Total Population', 'Area', 'Accommodation&Food', 'Retail Trade', 'Longitude',
                  'Latitude', 'Age 18-44', 'Democrat', 'Population Density']
     lgb_feature_imp_runs['Feature_names_o'] = lgb_feature_imp_runs['Feature_names']
     lgb_feature_imp_runs.loc[~lgb_feature_imp_runs['Feature_names_o'].isin(top_label), 'Feature_names_o'] = 'Others'
-    lgb_feature_imp_runs_o = lgb_feature_imp_runs.groupby(['num', 'Feature_names_o']).sum().reset_index()
+    lgb_feature_imp_runs_o = lgb_feature_imp_runs.groupby(['num', 'fold', 'Feature_names_o'])[['split', 'gain']].sum().reset_index()
+    lgb_feature_imp_runs_o = lgb_feature_imp_runs_o.groupby(['num', 'Feature_names_o'])[['split', 'gain']].mean().reset_index()
     cat_feature = CategoricalDtype(top_label, ordered=True)
     lgb_feature_imp_runs_o['Feature_names_o'] = lgb_feature_imp_runs_o['Feature_names_o'].astype(cat_feature)
     lgb_feature_imp_runs_o = lgb_feature_imp_runs_o.sort_values(by=['num', 'gain'], ascending=False)
@@ -526,8 +532,10 @@ for kk in range(0, len(pall_para)):
     lgb_feature_imp_runs_o, lbg_acc = para_rerun(lgb_est_cp, oa_list[kk], pall_para[kk])
     lgb_feature_imp_runs_o['Para'] = pall_para[kk]
     lbg_acc['Para'] = pall_para[kk]
-    all_lgb_feature = all_lgb_feature.append(lgb_feature_imp_runs_o)
-    all_lbg_acc = all_lbg_acc.append(lbg_acc)
+    all_lgb_feature = pd.concat([all_lgb_feature, lgb_feature_imp_runs_o], ignore_index=True)
+    all_lbg_acc = pd.concat([all_lbg_acc, lbg_acc], ignore_index=True)
+
+all_lbg_acc.to_csv(dir_path + r'Results\parameter_fold_metrics.csv', index=False)
 
 # Plot
 plt.rcParams.update({'font.size': 16})
@@ -535,7 +543,7 @@ fig, ax = plt.subplots(2, 3, figsize=(15, 9.5))
 axs = ax.flatten()
 for kk in range(0, len(pall_para)):
     lgb_feature_imp_runs_o = all_lgb_feature[all_lgb_feature['Para'] == pall_para[kk]]
-    lbg_acc = all_lbg_acc[all_lbg_acc['Para'] == pall_para[kk]].copy()
+    lbg_acc = all_lbg_acc[all_lbg_acc['Para'] == pall_para[kk]].groupby('num', as_index=False)[['Train', 'Valid']].mean()
     # Plot the MAPE recorded by the estimator without random rescaling.
     sns.lineplot(x="num", y="gain", hue="Feature_names_o", data=lgb_feature_imp_runs_o, palette='coolwarm',
                  style="Feature_names_o", markers=True, ax=axs[kk], lw=2, markersize=7)
@@ -543,8 +551,8 @@ for kk in range(0, len(pall_para)):
     axs[kk].set_ylabel('Feature Importance (%)')
     axs[kk].set_xlabel(pa_name[kk])
     axt = axs[kk].twinx()
-    axt.plot(lbg_acc['num'], lbg_acc['Train'] * 100, lw=2, label='Training MAPE', color='g')
-    axt.plot(lbg_acc['num'], lbg_acc['Valid'] * 100, '--', lw=2, label='Validation MAPE', color='k')
+    axt.plot(lbg_acc['num'], lbg_acc['Train'] * 100, lw=2, label='Mean Training MAPE (5 folds)', color='g')
+    axt.plot(lbg_acc['num'], lbg_acc['Valid'] * 100, '--', lw=2, label='Mean Validation MAPE (5 folds)', color='k')
     axt.legend([])
     axt.set_ylabel('MAPE (%)')
 handles, labels = axs[0].get_legend_handles_labels()
